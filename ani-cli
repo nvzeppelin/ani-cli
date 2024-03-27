@@ -63,6 +63,8 @@ help_info() {
         Play dubbed version
       --rofi
         Use rofi instead of fzf for the interactive menu
+      --playlist
+        Play all episodes of show as a playlist
       --skip
         Use ani-skip to skip the intro of the episode (mpv only)
       --no-detach
@@ -274,6 +276,31 @@ play_episode() {
     [ "$use_external_menu" = "1" ] && wait
 }
 
+play_playlist() {
+    case "$player_function" in
+        mpv*)
+            if [ "$no_detach" = 0 ]; then
+                nohup "$player_function" $skip_flag --force-media-title="${allanime_title}" "$episode" >/dev/null 2>&1 &
+            else
+                "$player_function" $skip_flag --force-media-title="${allanime_title}" "$episode"
+            fi
+            ;;
+        android_mpv) nohup am start --user 0 -a android.intent.action.VIEW -d "$episode" -n is.xyz.mpv/.MPVActivity >/dev/null 2>&1 & ;;
+        android_vlc) nohup am start --user 0 -a android.intent.action.VIEW -d "$episode" -n org.videolan.vlc/org.videolan.vlc.gui.video.VideoPlayerActivity -e "title" "${allanime_title}" >/dev/null 2>&1 & ;;
+        iina) nohup "$player_function" --no-stdin --keep-running --mpv-force-media-title="${allanime_title}" "$episode" >/dev/null 2>&1 & ;;
+        flatpak_mpv) flatpak run io.mpv.Mpv --force-media-title="${allanime_title}" "$episode" >/dev/null 2>&1 & ;;
+        vlc*) nohup "$player_function" --play-and-exit --meta-title="${allanime_title}" "$episode" >/dev/null 2>&1 & ;;
+        *yncpla*) nohup "$player_function" "$episode" -- --force-media-title="${allanime_title}" >/dev/null 2>&1 & ;;
+        download) "$player_function" "$episode" "${allanime_title}" ;;
+        catt) nohup catt cast "$episode" >/dev/null 2>&1 & ;;
+        iSH)
+            printf "\e]8;;vlc://%s\a~~~~~~~~~~~~~~~~~~~~\n~ Tap to open VLC ~\n~~~~~~~~~~~~~~~~~~~~\e]8;;\a\n" "$episode"
+            sleep 5
+            ;;
+        *) nohup "$player_function" "$episode" >/dev/null 2>&1 & ;;
+    esac
+}
+
 play() {
     start=$(printf "%s" "$ep_no" | grep -Eo '^(-1|[0-9]+(\.[0-9]+)?)')
     end=$(printf "%s" "$ep_no" | grep -Eo '(-1|[0-9]+(\.[0-9]+)?)$')
@@ -375,6 +402,7 @@ while [ $# -gt 0 ]; do
             shift
             ;;
         --dub) mode="dub" ;;
+        --playlist) as_playlist=1 ;;
         --no-detach) no_detach=1 ;;
         --rofi) use_external_menu=1 ;;
         --skip) skip_intro=1 ;;
@@ -440,8 +468,21 @@ case "$search" in
         allanime_title="$(printf "%s" "$title" | cut -d'(' -f1 | tr -d '[:punct:]')"
         id=$(printf "%s" "$result" | cut -f1)
         ep_list=$(episodes_list "$id")
-        [ -z "$ep_no" ] && ep_no=$(printf "%s" "$ep_list" | nth "Select episode: " "$multi_selection_flag")
-        [ -z "$ep_no" ] && exit 1
+        if [ -z $as_playlist ]; then
+            [ -z "$ep_no" ] && ep_no=$(printf "%s" "$ep_list" | nth "Select episode: " "$multi_selection_flag")
+            [ -z "$ep_no" ] && exit 1
+        else
+            [ -f /tmp/ani-cli-playlist.m3u ] && rm /tmp/ani-cli-playlist.m3u
+            for ep_no in $ep_list
+            do
+                get_episode_url
+                echo $episode >> /tmp/ani-cli-playlist.m3u
+                unset episode
+            done
+            episode=/tmp/ani-cli-playlist.m3u
+            play_playlist
+            exit 0
+        fi
         ;;
 esac
 
